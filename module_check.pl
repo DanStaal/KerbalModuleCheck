@@ -2,6 +2,7 @@
 
 use warnings;
 use strict;
+use v5.10;
 
 use File::Find;
 use File::Basename;
@@ -11,11 +12,15 @@ use Pod::Usage;
 
 my $VERSION = 0.01;
 
+use constant TRUE  => 1;
+use constant FALSE => 0;
+
 my $errors;
 my $vfiles;
 my $nonVmods;
 my $gCount;
 my $manager;
+my $list;
 my $help;
 
 GetOptions(
@@ -24,6 +29,7 @@ GetOptions(
             "files"    => \$vfiles,
             "folders"  => \$nonVmods,
             "manager"  => \$manager,
+            'list'     => \$list,
             "help|?|h" => \$help,
           );
 pod2usage(1) if $help;
@@ -31,7 +37,7 @@ pod2usage(1) if $help;
 my @version_files;    # The list of all version files.
 my %mods
   ; # The full hash of folders.  (And whether they contain version files in any subfolder.)
-my $gamedata_count;    # The count of GameData folders.
+my @gamedata;          # The locations of GameData folders.
 my @module_manager;    # The list of all Module Manager installs.
 
 foreach (@ARGV) {
@@ -44,46 +50,64 @@ foreach (@ARGV) {
         );
 }
 
-print "\nCount of GameData folders (should be 1): $gamedata_count\n" if ($gCount or ($errors and $gamedata_count > 1));
+# Pare down the list to only the top-level directories.
+my @not_toplevel = grep { $_ !~ m|GameData/[^/]+$| } keys %mods;
+delete @mods{@not_toplevel};
+
+print "\nCount of GameData folders (should be 1): " . scalar @gamedata . "\n"
+  if ( $gCount or ( $errors and @gamedata > 1 ) );
+
+if ( $errors and @gamedata > 1 ) {
+    print "\nGameData folders found at:\n";
+    say '==========================';
+    print sort map { "$_\n" } @gamedata;
+} ## end if ( $errors and @gamedata...)
 
 if ( $manager or ( @module_manager > 1 and $errors ) ) {
     print "\nModule Manager found at:\n";
-    print "========================\n";
-    print sort map { $_ . "\n" } @module_manager;
+    say '========================';
+    print sort map { "$_\n" } @module_manager;
 } ## end if ( $manager or ( @module_manager...))
 
 if ($vfiles) {
     print "\nList of version files:\n";
-    print "======================\n";
+    say '======================';
     print sort map { fileparse($_) . "\n" } @version_files;
 } ## end if ($vfiles)
 
 if ($nonVmods) {
     print "\nList of directories without version files:\n";
-    print "==========================================\n";
+    say '===========================================';
     my @folder_list =
-      sort grep { ( $_ =~ m|GameData/[^/]+$| ) and ( $mods{$_} eq 'false' ) }
-      keys %mods;
+      sort grep { $mods{$_} eq FALSE } keys %mods;
     print map { fileparse($_) . "\n" } @folder_list;
 } ## end if ($nonVmods)
+
+if ($list) {
+    print
+      "\nList of folders in GameData, and whether they hold .version files:\n";
+    say '================================================================';
+    print map {
+        ( $mods{$_} ? 'Versioned: ' : 'Not versioned: ' )
+          . fileparse($_) . "\n"
+    } sort keys %mods;
+} ## end if ($list)
 
 exit;
 
 sub filters {
 
     # Set that we haven't seen a version file here yet.
-    $mods{$File::Find::dir} = 'false';
+    $mods{$File::Find::dir} = FALSE;
 
-    # Count GameData folders and print out their locations.
+    # Grab GameData folder locations.
     if ( $File::Find::dir =~ m/GameData$/ ) {
-        $gamedata_count++;
-        print "Found nested GameData folder at: $File::Find::dir\n"
-          if ( $errors and $gamedata_count > 1 );
-    } ## end if ( $File::Find::dir ...)
+        push @gamedata, $File::Find::dir;
+    }
 
 # Return the list.
 # We're checking all visible (not hidden) folders that aren't PluginData or Squad.
-  return grep { $_ !~ m/PluginData$|^\.|^Squad$/ } @_;
+  return grep { $_ !~ m/^PluginData$|^\.|^Squad$/ } @_;
 } ## end sub filters
 
 sub search {
@@ -91,7 +115,7 @@ sub search {
     # Check to see if this is a version file.
     if ( $_ =~ m/\.version$/ ) {
         push @version_files, $File::Find::name;
-        $mods{$File::Find::dir} = 'true';
+        $mods{$File::Find::dir} = TRUE;
     }
 
     # Check to see if this is a copy of Module Manager.
@@ -103,6 +127,7 @@ sub search {
 
 sub after {
     my ( $temp, $parent ) = fileparse($File::Find::dir);
-    chop $parent;
-    $mods{$parent} = 'true' if ( $mods{$File::Find::dir} eq 'true' );
+    chop
+      $parent;   # ::dir always ends with a directory separator, ::name without.
+    $mods{$parent} = TRUE if ( $mods{$File::Find::dir} eq TRUE );
 } ## end sub after
