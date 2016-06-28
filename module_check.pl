@@ -138,7 +138,7 @@ sub search {
     my $st = stat($_)
       or warn "Can't get timestamp on $_: $!";
     $mods{$File::Find::dir}[1] = $st->mtime
-      if ( $st->mtime > $mods{$File::Find::dir}[1] );
+      if ( $st->mtime > ( $mods{$File::Find::dir}[1] // 0 ) );
 
     # Check to see if this is a version file.
     if ( $_ =~ m/\.version$/ ) {
@@ -154,7 +154,7 @@ sub search {
 } ## end sub search
 
 sub after {
-    my ( $temp, $parent ) = fileparse($File::Find::dir);
+    my ( undef, $parent ) = fileparse($File::Find::dir);
     chop
       $parent;   # ::dir always ends with a directory separator, ::name without.
 
@@ -163,7 +163,7 @@ sub after {
 
     # Set directory modified date to the most recent file/directory in it.
     $mods{$parent}[1] = $mods{$File::Find::dir}[1]
-      if ( $mods{$File::Find::dir}[1] > $mods{$parent}[1] );
+      if ( $mods{$File::Find::dir}[1] > ( $mods{$parent}[1] // 0 ) );
 
   return;
 } ## end sub after
