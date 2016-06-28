@@ -9,6 +9,8 @@ use File::Basename;
 use Data::Dumper;
 use Getopt::Long;
 use Pod::Usage;
+use File::stat;
+use POSIX;
 
 my $VERSION = 0.01;
 
@@ -21,7 +23,9 @@ my $nonVmods;
 my $gCount;
 my $manager;
 my $list;
+my $time;
 my $help;
+my $debug;
 
 GetOptions(
             "count"    => \$gCount,
@@ -30,6 +34,8 @@ GetOptions(
             "folders"  => \$nonVmods,
             "manager"  => \$manager,
             'list'     => \$list,
+            'time'     => \$time,
+            'debug'    => \$debug,
             "help|?|h" => \$help,
           );
 pod2usage(1) if $help;
@@ -79,7 +85,7 @@ if ($nonVmods) {
     print "\nList of directories without version files:\n";
     say '===========================================';
     my @folder_list =
-      sort grep { $mods{$_} eq FALSE } keys %mods;
+      sort grep { $mods{$_}[0] eq FALSE } keys %mods;
     print map { fileparse($_) . "\n" } @folder_list;
 } ## end if ($nonVmods)
 
@@ -88,17 +94,33 @@ if ($list) {
       "\nList of folders in GameData, and whether they hold .version files:\n";
     say '================================================================';
     print map {
-        ( $mods{$_} ? 'Versioned: ' : 'Not versioned: ' )
+        ( $mods{$_}[0] ? 'Versioned: ' : 'Not versioned: ' )
           . fileparse($_) . "\n"
     } sort keys %mods;
 } ## end if ($list)
+
+if ($time) {
+    print "\nLast modified times for all top-level directories:\n";
+    say '==================================================';
+    print sort map {
+            strftime( '%Y-%m-%d %H:%M', localtime( $mods{$_}[1] ) ) . ' - '
+          . fileparse($_) . "\n"
+    } keys %mods;
+} ## end if ($time)
+
+print Dumper \%mods if ($debug);
 
 exit;
 
 sub filters {
 
     # Set that we haven't seen a version file here yet.
-    $mods{$File::Find::dir} = FALSE;
+    $mods{$File::Find::dir} = [FALSE];
+
+    # Record the modified timestamp.
+    my $st = stat($File::Find::dir)
+      or warn "Can't get timestamp on $File::Find::dir: $!";
+    $mods{$File::Find::dir}[1] = $st->mtime;
 
     # Grab GameData folder locations.
     if ( $File::Find::dir =~ m/GameData$/ ) {
@@ -112,10 +134,16 @@ sub filters {
 
 sub search {
 
+    # Set directory modified date to the most recent file in it.
+    my $st = stat($_)
+      or warn "Can't get timestamp on $_: $!";
+    $mods{$File::Find::dir}[1] = $st->mtime
+      if ( $st->mtime > $mods{$File::Find::dir}[1] );
+
     # Check to see if this is a version file.
     if ( $_ =~ m/\.version$/ ) {
         push @version_files, $File::Find::name;
-        $mods{$File::Find::dir} = TRUE;
+        $mods{$File::Find::dir}[0] = TRUE;
     }
 
     # Check to see if this is a copy of Module Manager.
@@ -129,5 +157,13 @@ sub after {
     my ( $temp, $parent ) = fileparse($File::Find::dir);
     chop
       $parent;   # ::dir always ends with a directory separator, ::name without.
-    $mods{$parent} = TRUE if ( $mods{$File::Find::dir} eq TRUE );
+
+    # If any subfolder has a version file, we count it.
+    $mods{$parent}[0] = TRUE if ( $mods{$File::Find::dir}[0] eq TRUE );
+
+    # Set directory modified date to the most recent file/directory in it.
+    $mods{$parent}[1] = $mods{$File::Find::dir}[1]
+      if ( $mods{$File::Find::dir}[1] > $mods{$parent}[1] );
+
+  return;
 } ## end sub after
